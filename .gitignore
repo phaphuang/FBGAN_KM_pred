@@ -1,0 +1,4 @@
+sample
+*.pyc
+*__pycache__
+*checkpoint
