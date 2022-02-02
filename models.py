@@ -81,14 +81,10 @@ class Discriminator_lang(nn.Module):
         self.conv1d = nn.Conv1d(n_chars, hidden, 1)
         self.linear = nn.Linear(seq_len*hidden, 1)
 
-        self.linear_logkm = nn.Linear(seq_len*hidden, 1)
-
     def forward(self, input):
         output = input.transpose(1, 2) # (BATCH_SIZE, len(charmap), SEQ_LEN)
         output = self.conv1d(output)
         output = self.block(output)
         output = output.view(-1, self.seq_len*self.hidden)
         disc_output = self.linear(output)
-
-        es_logkm = self.linear_logkm(output)
-        return disc_output, es_logkm
+        return disc_output
