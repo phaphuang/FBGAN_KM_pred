@@ -149,7 +149,7 @@ def load_dataset_ecfp(max_length, max_n_examples, tokenize=False, max_vocab_size
 
     filtered_lines = []
     logkm_lists = []
-    ecfp_lists = []
+    substrate_ecfp_lists = []
     for line, ecfp_line, logkm in lines:
         filtered_line = []
         for char in line:
@@ -159,7 +159,7 @@ def load_dataset_ecfp(max_length, max_n_examples, tokenize=False, max_vocab_size
                 # convert all characters to '0' if not exist in inv_charmap
                 filtered_line.append('0')
         filtered_lines.append(tuple(filtered_line))
-        ecfp_lists.append(ecfp_line)
+        substrate_ecfp_lists.append(ecfp_line)
         logkm_lists.append(logkm)
 
     for i in range(1):
@@ -168,7 +168,7 @@ def load_dataset_ecfp(max_length, max_n_examples, tokenize=False, max_vocab_size
 
     print("loaded {} lines in dataset".format(len(lines)))
     # print(charmap, inv_charmap) # {'P': 0, 'A': 1, 'T': 2, 'G': 3, 'C': 4} ['P', 'A', 'T', 'G', 'C']
-    return filtered_lines, charmap, inv_charmap, ecfp_lists, logkm_lists
+    return filtered_lines, charmap, inv_charmap, substrate_ecfp_lists, logkm_lists
 
 def convert_real_to_one_hot(real_x):
     real_to_display = F.one_hot(real_x, 11)

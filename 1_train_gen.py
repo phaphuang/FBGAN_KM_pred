@@ -59,8 +59,6 @@ class WGAN_LangGP():
     def save_model(self, epoch):
         torch.save(self.G.state_dict(), self.checkpoint_dir + "G_weights_{}.pth".format(epoch))
         torch.save(self.D.state_dict(), self.checkpoint_dir + "D_weights_{}.pth".format(epoch))
-
-        torch.save(self.V.state_dict(), self.checkpoint_dir + "V_weights_{}.pth".format(epoch))
     
     def load_model(self, directory = ''):
         '''

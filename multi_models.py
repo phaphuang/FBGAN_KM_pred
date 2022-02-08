@@ -90,31 +90,55 @@ class Discriminator_lang(nn.Module):
         return disc_output
 
 
+class ResBlock_logkm(nn.Module):
+    def __init__(self, hidden):
+        super(ResBlock_logkm, self).__init__()
+        self.res_block = nn.Sequential(
+            nn.ReLU(True),
+            nn.Linear(hidden, hidden),
+            nn.ReLU(True),
+            nn.Linear(hidden, hidden),
+        )
+
+    def forward(self, input):
+        output = self.res_block(input)
+        return input + output
+
 class Discriminator_logkm(nn.Module):
-    def __init__(self, n_chars, seq_len, batch_size, hidden):
+    def __init__(self, n_chars, seq_len, batch_size, hidden, sub_len):
         super(Discriminator_logkm, self).__init__()
         self.n_chars = n_chars
         self.seq_len = seq_len
         self.batch_size = batch_size
         self.hidden = hidden
+        self.sub_len = sub_len
         self.block = nn.Sequential(
-            ResBlock(hidden),
-            ResBlock(hidden),
-            ResBlock(hidden),
-            ResBlock(hidden),
-            ResBlock(hidden),
+            ResBlock_logkm(hidden),
+            ResBlock_logkm(hidden),
+            ResBlock_logkm(hidden),
+            ResBlock_logkm(hidden),
+            ResBlock_logkm(hidden),
         )
-        self.conv1d = nn.Conv1d(n_chars, hidden, 1)
+        self.fc = nn.Linear((n_chars * seq_len) + sub_len, hidden)
 
-        self.linear_logkm = nn.Linear(seq_len*hidden, 1)
+        self.linear_logkm = nn.Linear(hidden, 1)
         self.act = nn.LeakyReLU(0.02)
 
-    def forward(self, input):
-        output = input.transpose(1, 2) # (BATCH_SIZE, len(charmap), SEQ_LEN)
-        output = self.conv1d(output)
-        output = self.block(output)
-        output = output.view(-1, self.seq_len*self.hidden)
+    def forward(self, input, sub):
 
+        input = input.view(-1, self.n_chars * self.seq_len) # (BATCH_SIZE, len(charmap), SEQ_LEN)
+        init_input = torch.cat([input, sub], dim=1)
+        output = self.fc(init_input)
+        output = self.block(output)
         es_logkm = self.linear_logkm(output)
 
         return self.act(es_logkm)
+
+if __name__ == "__main__":
+    x = torch.randn(16, 21, 512)
+    c = torch.randn(16, 1024)
+
+    net = Discriminator_logkm(21, 512, 16, 512, 1024)
+
+    out = net(x, c)
+    print(out.shape)

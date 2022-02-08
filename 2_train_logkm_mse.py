@@ -16,8 +16,8 @@ import numpy as np
 from multi_models import *
 
 class WGAN_LangGP():
-    def __init__(self, batch_size=16, lr=0.0001, num_epochs=1000, seq_len=512, data_dir="./data/brenda_data_checkpoint_5.csv",
-        run_name="test", hidden=512, d_steps=5, g_steps=1):
+    def __init__(self, batch_size=16, lr=0.0001, num_epochs=1000, seq_len=512, data_dir="./data/new_brenda_substrate_df_data.csv",
+        run_name="test", hidden=512, d_steps=5, g_steps=1, sub_len=1024):
 
         self.hidden = hidden
         self.batch_size = batch_size
@@ -27,6 +27,8 @@ class WGAN_LangGP():
         self.d_steps = d_steps
         self.g_steps = g_steps
         self.lamda = 10
+
+        self.sub_len = sub_len
 
         self.checkpoint_dir = './checkpoint/' + run_name + "/"
         self.sample_dir = './sample/' + run_name + "/"
@@ -40,7 +42,7 @@ class WGAN_LangGP():
         self.G = Generator_lang(len(self.charmap), self.seq_len, self.batch_size, self.hidden)
         self.D = Discriminator_lang(len(self.charmap), self.seq_len, self.batch_size, self.hidden)
 
-        self.V = Discriminator_logkm(len(self.charmap), self.seq_len, self.batch_size, self.hidden)
+        self.V = Discriminator_logkm(len(self.charmap), self.seq_len, self.batch_size, self.hidden, self.sub_len)
         if self.use_cuda:
             self.G.cuda()
             self.D.cuda()
@@ -56,12 +58,11 @@ class WGAN_LangGP():
 
     def load_data(self, datadir):
         max_examples = 1e6
-        lines, self.charmap, self.inv_charmap, self.logkm_list = utils.language_helpers.load_dataset(
+        self.data, self.charmap, self.inv_charmap, self.substate_ecfp, self.logkm_list = utils.language_helpers.load_dataset_ecfp(
             max_length=self.seq_len,
             max_n_examples=max_examples,
             data_dir=datadir
         )
-        self.data = lines
     
     def save_model(self, epoch):
         torch.save(self.G.state_dict(), self.checkpoint_dir + "G_weights_{}.pth".format(epoch))
@@ -114,9 +115,8 @@ class WGAN_LangGP():
         #gradient_penalty = ((gradients.norm(2, dim=1).norm(2,dim=1) - 1) ** 2).mean() * self.lamda
         return self.lamda * ((gradients_norm - 1) ** 2).mean()
     
-    def disc_train_iteration(self, real_data, logkm_data):
+    def disc_train_iteration(self, real_data, substrate_data, logkm_data):
         self.D_optimizer.zero_grad()
-        self.V_optimizer.zero_grad()
 
         fake_data = self.sample_generator(self.batch_size)
         d_fake_pred = self.D(fake_data)
@@ -131,8 +131,12 @@ class WGAN_LangGP():
         self.D_optimizer.step()
 
         ######### Calculate Log KM ##########
-        logkm_pred = self.V(real_data)
+        self.V_optimizer.zero_grad()
+
+        fake_data = self.sample_generator(self.batch_size)
+        logkm_pred = self.V(fake_data, substrate_data)
         logkm_err = self.criterion(logkm_data, logkm_pred.squeeze())
+        
         logkm_err.backward()
         self.V_optimizer.step()
 
@@ -185,7 +189,13 @@ class WGAN_LangGP():
                 logkm_data = torch.Tensor(np.array(self.logkm_list[idx*self.batch_size:(idx+1)*self.batch_size]))
                 logkm_data = to_var(logkm_data)
 
-                d_fake_err, d_real_err, gradient_penalty, d_err, logkm_err = self.disc_train_iteration(real_data, logkm_data)
+                substrate_data = torch.Tensor(np.array(
+                    [[c for c in l] for l in self.substate_ecfp[idx*self.batch_size:(idx+1)*self.batch_size]],
+                    dtype="int32"
+                ))
+                substrate_data = to_var(substrate_data)
+
+                d_fake_err, d_real_err, gradient_penalty, d_err, logkm_err = self.disc_train_iteration(real_data, substrate_data, logkm_data)
 
                 # Append things for logging
                 d_fake_np, d_real_np, gp_np = d_fake_err.cpu().numpy(), \
