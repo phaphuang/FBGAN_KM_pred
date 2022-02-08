@@ -122,7 +122,6 @@ class Discriminator_logkm(nn.Module):
         self.fc = nn.Linear((n_chars * seq_len) + sub_len, hidden)
 
         self.linear_logkm = nn.Linear(hidden, 1)
-        self.act = nn.LeakyReLU(0.02)
 
     def forward(self, input, sub):
 
@@ -132,7 +131,7 @@ class Discriminator_logkm(nn.Module):
         output = self.block(output)
         es_logkm = self.linear_logkm(output)
 
-        return self.act(es_logkm)
+        return es_logkm
 
 if __name__ == "__main__":
     x = torch.randn(16, 21, 512)
