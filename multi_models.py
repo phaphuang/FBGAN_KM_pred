@@ -20,6 +20,10 @@ import torch.nn.functional as F
 import torch.autograd as autograd
 from torch.autograd import Variable
 from utils.torch_utils import *
+import numpy as np
+
+from utils.constants import AMINO_ACID_TO_ID
+from sklearn.preprocessing import OneHotEncoder
 
 class ResBlock(nn.Module):
     def __init__(self, hidden):
@@ -112,6 +116,7 @@ class Discriminator_logkm(nn.Module):
         self.batch_size = batch_size
         self.hidden = hidden
         self.sub_len = sub_len
+        self.use_gpu = True if torch.cuda.is_available() else False
         self.block = nn.Sequential(
             ResBlock_logkm(hidden),
             ResBlock_logkm(hidden),
@@ -132,6 +137,46 @@ class Discriminator_logkm(nn.Module):
         es_logkm = self.linear_logkm(output)
 
         return es_logkm
+    
+    def indexes_from_sentence(self, sentence):
+        return [AMINO_ACID_TO_ID[t] for t in sentence]
+    
+    def pad_seq(self, seq, pad_char, length):
+        padded_seq = seq + [pad_char]*(length - len(seq))
+        return padded_seq
+    
+    def predict_model(self, input_seqs, substrates):
+        PAD_token = 0
+        num_pred_batches = int(len(input_seqs)/self.batch_size)
+        all_preds = np.zeros((num_pred_batches*self.batch_size, 1))
+
+        table = np.arange(len(AMINO_ACID_TO_ID)).reshape(-1, 1)
+        one_hot = OneHotEncoder()
+        one_hot.fit(table)
+
+        #print("This is length: ", len(input_seqs), len(substrates))
+
+        for idx in range(num_pred_batches):
+            batch_seqs = input_seqs[idx*self.batch_size:(idx+1)*self.batch_size]
+            tokenized_seqs = [self.indexes_from_sentence(s.strip()) for s in batch_seqs]
+            input_lengths = [len(s) for s in tokenized_seqs]
+            input_padded = [self.pad_seq(s, PAD_token, max(input_lengths)) for s in tokenized_seqs]
+            input_var = Variable(torch.LongTensor(input_padded)).transpose(0,1)
+            #print("Input Var shape: ", input_var.shape)
+            data_one_hot = one_hot.transform(input_var.reshape(-1, 1)).toarray().reshape(self.batch_size, -1, len(AMINO_ACID_TO_ID))
+            real_data = torch.Tensor(data_one_hot)
+            real_data = real_data.cuda() if self.use_gpu else real_data
+            
+            batch_subs = substrates[idx*self.batch_size:(idx+1)*self.batch_size]
+
+            input = real_data.view(-1, self.n_chars * self.seq_len) # (BATCH_SIZE, len(charmap), SEQ_LEN)
+            init_input = torch.cat([input, batch_subs], dim=1)
+            output = self.fc(init_input)
+            output = self.block(output)
+            es_logkm = self.linear_logkm(output)
+            all_preds[idx*self.batch_size:(idx+1)*self.batch_size,:] = es_logkm.data.cpu().numpy()
+        return all_preds
+
 
 if __name__ == "__main__":
     x = torch.randn(16, 21, 512)
