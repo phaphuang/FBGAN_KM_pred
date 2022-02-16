@@ -12,8 +12,12 @@ import os
 from torch import optim
 import glob
 
+from sklearn.model_selection import train_test_split
+
+seed = 42
+
 class KM_Predictor():
-    def __init__(self, batch_size=16, lr=0.001, num_epochs=1000, seq_len=512, data_dir="./data/new_brenda_substrate_df_data.csv",
+    def __init__(self, batch_size=16, lr=0.001, num_epochs=2000, seq_len=512, data_dir="./data/new_brenda_substrate_df_data.csv",
         run_name_pred="test_pred", hidden=512, sub_len=1024):
 
         self.hidden = hidden
@@ -36,7 +40,8 @@ class KM_Predictor():
             self.P.cuda()
         
         self.P_optimizer = optim.Adam(self.P.parameters(), lr=self.lr, betas=(0.5, 0.9))
-        self.criterion = nn.MSELoss()
+        #self.criterion = nn.MSELoss()
+        self.criterion = nn.L1Loss()
     
     def load_data(self, datadir):
         max_examples = 1e6
@@ -80,9 +85,8 @@ class KM_Predictor():
     
     def train_model(self, load_dir_valid):
         init_epoch =self.load_model(load_dir_valid)
-        n_batches = int(len(self.data)/self.batch_size)
-        total_iterations = n_batches * self.n_epochs
         losses_f = open(self.checkpoint_pred_dir + "pred_losses.txt",'a+')
+        losses_f_eval = open(self.checkpoint_pred_dir + "eval_pred_losses.txt",'a+')
         P_losses = []
 
         table = np.arange(len(self.charmap)).reshape(-1,1)
@@ -94,17 +98,24 @@ class KM_Predictor():
         else:
             counter = 0
         
+        X_train, X_test, y_train, y_test = train_test_split(self.data, self.logkm_list, test_size=0.2, random_state=seed)
+        n_train_batches = int(len(X_train)/self.batch_size)
+        total_train_iteration = n_train_batches * self.n_epochs
+
+        n_test_batches = int(len(X_test)/self.batch_size)
+        total_test_iteration = n_test_batches * self.n_epochs
+        
         for epoch in range(self.n_epochs):
-            for idx in range(n_batches):
+            for idx in range(n_train_batches):
                 _data = np.array(
-                    [[self.charmap[c] for c in l] for l in self.data[idx*self.batch_size:(idx+1)*self.batch_size]],
+                    [[self.charmap[c] for c in l] for l in X_train[idx*self.batch_size:(idx+1)*self.batch_size]],
                     dtype='int32'
                 )
                 data_one_hot = one_hot.transform(_data.reshape(-1, 1)).toarray().reshape(self.batch_size, -1, len(self.charmap))
                 real_data = torch.Tensor(data_one_hot)
                 real_data = to_var(real_data)
 
-                logkm_data = torch.Tensor(np.array(self.logkm_list[idx*self.batch_size:(idx+1)*self.batch_size]))
+                logkm_data = torch.Tensor(np.array(y_train[idx*self.batch_size:(idx+1)*self.batch_size]))
                 logkm_data = to_var(logkm_data)
 
                 substrate_data = torch.Tensor(np.array(
@@ -115,19 +126,49 @@ class KM_Predictor():
 
                 logkm_err = self.pred_train_iteration(real_data, substrate_data, logkm_data)
 
-                P_losses.append(logkm_err)
+                P_losses.append(logkm_err.item())
 
                 if counter % 5000 == 0:
                     self.save_model(counter)
-                
-                if counter % 5000 == 0:
-                    summary_str = 'Iteration [{}/{}] - loss_km: {}'\
-                        .format(counter, total_iterations, logkm_err)
-                    print(summary_str)
-                    losses_f.write(summary_str + "\n")
-                    plot_losses([P_losses], ["logkm"], self.checkpoint_pred_dir + "logkm.png")
+
                 counter += 1
-            np.random.shuffle(self.data)
+
+            summary_str = 'Train Epoch [{}/{}] Iteration [{}/{}] - loss_km: {}'\
+                .format(epoch, self.n_epochs, counter, total_train_iteration, np.mean(P_losses))
+            print(summary_str)
+            losses_f.write(summary_str + "\n")
+            plot_losses([P_losses], ["logkm"], self.checkpoint_pred_dir + "logkm.png")
+            
+            self.P.eval()
+            P_losses_eval = []
+            for idx in range(n_test_batches):
+                _data = np.array(
+                    [[self.charmap[c] for c in l] for l in X_test[idx*self.batch_size:(idx+1)*self.batch_size]],
+                    dtype='int32'
+                )
+                data_one_hot = one_hot.transform(_data.reshape(-1, 1)).toarray().reshape(self.batch_size, -1, len(self.charmap))
+                real_data = torch.Tensor(data_one_hot)
+                real_data = to_var(real_data)
+
+                logkm_data = torch.Tensor(np.array(y_test[idx*self.batch_size:(idx+1)*self.batch_size]))
+                logkm_data = to_var(logkm_data)
+
+                substrate_data = torch.Tensor(np.array(
+                    [[c for c in l] for l in self.substate_ecfp[idx*self.batch_size:(idx+1)*self.batch_size]],
+                    dtype="int32"
+                ))
+                substrate_data = to_var(substrate_data)
+
+                logkm_pred = self.P(real_data, substrate_data)
+                logkm_err = self.criterion(logkm_data, logkm_pred.squeeze())
+
+                P_losses_eval.append(logkm_err.item())
+
+
+            summary_str = 'Test Epoch [{}/{}] - loss_km: {}'\
+                        .format(epoch, self.n_epochs, np.mean(P_losses_eval))
+            print(summary_str)
+            losses_f_eval.write(summary_str + "\n")
 
 def main():
     parser = argparse.ArgumentParser(description='Predictor for estimating KM values')
