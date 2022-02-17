@@ -14,7 +14,7 @@
 #
 
 import torch
-from torch import optim
+from torch import LongTensor, optim
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.autograd as autograd
@@ -177,12 +177,40 @@ class Discriminator_logkm(nn.Module):
             all_preds[idx*self.batch_size:(idx+1)*self.batch_size,:] = es_logkm.data.cpu().numpy()
         return all_preds
 
+class GRUClassifier(nn.Module):
+    def __init__(self, vocab_size, batch_size, hidden_dim):
+        super(GRUClassifier, self).__init__()
+        self.hidden = hidden_dim
+        self.embedding = nn.Embedding(vocab_size, hidden_dim)
+        self.gru = nn.GRU(hidden_dim, hidden_dim, bidirectional=False, num_layers=2, dropout=0.3)
+        self.linear = nn.Linear(hidden_dim, 1)
+        self.batch_size = batch_size
+        self.use_cuda = True if torch.cuda.is_available() else False
+
+        self.embedding_s = nn.Embedding(2, hidden_dim)
+    
+    def forward(self, x, h, s):
+        #print("Before embedding shape: ", x.shape, s.shape)
+        x = self.embedding(x)
+        s = self.embedding_s(s)
+        #print("After embedding shape: ", x.shape, s.shape)
+
+        x = torch.cat([x, s], axis=0)
+
+        x, h = self.gru(x, h)
+        x = self.linear(x[-1])
+        return x, h
+    
+    def init_hidden(self):
+        if self.use_cuda:
+            return Variable(torch.randn(2, self.batch_size, self.hidden)).cuda()
+        return Variable(torch.randn(2, self.batch_size, self.hidden))
 
 if __name__ == "__main__":
-    x = torch.randn(16, 21, 512)
-    c = torch.randn(16, 1024)
-
-    net = Discriminator_logkm(21, 512, 16, 512, 1024)
-
-    out = net(x, c)
+    x = torch.rand(512, 16).long()
+    s = torch.rand(1024, 16).long()
+    
+    net = GRUClassifier(21, 16, 128)
+    h = net.init_hidden()
+    out, h_out = net(x, h, s)
     print(out.shape)
